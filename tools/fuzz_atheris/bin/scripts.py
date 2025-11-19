@@ -553,18 +553,30 @@ if __name__ == "__main__":
 # ========================================================================
 def run_fuzz(harness_path: str, mode: str, seeds: Any) -> Dict[str, Any]:
     """
-    call:
-        python harness_path
-    Collect crash signals, output JSON-friendly info.
+    call: python harness_path
+    Collect crash signals, output JSON-friendly info, and save debug logs.
     """
     cmd = [sys.executable, harness_path]
 
-    # Quick mode: fewer iterations (Atheris via env var)
     env = os.environ.copy()
     if mode == "quick":
         env["ATHERIS_RUN_TIMEOUT"] = "2"
     elif mode == "debug":
         env["ATHERIS_NO_FUZZ"] = "1"
+
+    # --- NEW: create debug log path ---
+    debug_log_path = harness_path + ".debug.log"
+
+    # write command + env info first
+    with open(debug_log_path, "w", encoding="utf-8") as f:
+        f.write("=== FUZZ DEBUG LOG ===\n")
+        f.write("Command: " + " ".join(cmd) + "\n")
+        f.write("Mode: " + mode + "\n")
+        f.write("Env:\n")
+        for k,v in env.items():
+            if "ATHERIS" in k:
+                f.write(f"  {k}={v}\n")
+        f.write("\n--- Running subprocess ---\n")
 
     try:
         result = subprocess.run(
@@ -574,24 +586,43 @@ def run_fuzz(harness_path: str, mode: str, seeds: Any) -> Dict[str, Any]:
             env=env,
             timeout=20
         )
+
+        # --- NEW: append captured output to the debug log ---
+        with open(debug_log_path, "a", encoding="utf-8") as f:
+            f.write("\n--- Subprocess finished ---\n")
+            f.write("Return code: " + str(result.returncode) + "\n")
+            f.write("\n[STDOUT]\n" + result.stdout.decode("utf-8", errors="ignore"))
+            f.write("\n[STDERR]\n" + result.stderr.decode("utf-8", errors="ignore"))
+
         return {
             "stdout": result.stdout.decode("utf-8", errors="ignore"),
             "stderr": result.stderr.decode("utf-8", errors="ignore"),
             "returncode": result.returncode,
+            "debug_log": debug_log_path,   # NEW: return path to debug log
         }
-    except subprocess.TimeoutExpired:
+
+    except subprocess.TimeoutExpired as e:
+        # --- write timeout info ---
+        with open(debug_log_path, "a", encoding="utf-8") as f:
+            f.write("\n--- TIMEOUT ---\n")
+            f.write(str(e))
         return {
             "error": "timeout",
             "returncode": None,
             "stdout": "",
-            "stderr": ""
-        }
-    except Exception as e:
-        return {
-            "error": repr(e),
-            "traceback": traceback.format_exc()
+            "stderr": "",
+            "debug_log": debug_log_path,
         }
 
+    except Exception as e:
+        with open(debug_log_path, "a", encoding="utf-8") as f:
+            f.write("\n--- EXCEPTION ---\n")
+            f.write(traceback.format_exc())
+        return {
+            "error": repr(e),
+            "traceback": traceback.format_exc(),
+            "debug_log": debug_log_path,
+        }
 # ========================================================================
 # 7. Main entry
 # ========================================================================
