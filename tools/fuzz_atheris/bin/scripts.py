@@ -185,34 +185,29 @@ def load_spec_file(path: str) -> Dict[str, Any]:
 # ========================================================================
 # 3. Resolve target function
 # ========================================================================
-def resolve_target(target: str) -> Callable:
+def resolve_target(target: str):
     """
-    Accepts:
-        'module.sub:func'
-        './foo/bar.py:func'
-    Returns Python function object.
+    输入示例：
+        'pkg.mod:func'
+        'path/to/file.py:func'
+    输出：
+        (target_path, target_function_name)
+    其中：
+        - target_path：绝对路径（如果是模块名，则返回 None）
+        - target_function_name：字符串
     """
     if ":" not in target:
         raise ValueError("Target must be of the form 'module:func' or 'file.py:func'")
 
     left, func_name = target.split(":", 1)
-    print(left, func_name)
 
-    # Case 1: file path
+    # file path case
     if os.path.isfile(left) and left.endswith(".py"):
-        spec = importlib.util.spec_from_file_location("temp_target_module", left)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["temp_target_module"] = module
-        spec.loader.exec_module(module)
-        if not hasattr(module, func_name):
-            raise ValueError(f"Function '{func_name}' not found in {left}")
-        return getattr(module, func_name)
+        abs_path = os.path.abspath(left)
+        return abs_path, func_name
 
-    # Case 2: module path
-    module = importlib.import_module(left)
-    if not hasattr(module, func_name):
-        raise ValueError(f"Function '{func_name}' not found in module {left}")
-    return getattr(module, func_name)
+    # module import path case
+    return left, func_name
 
 
 # ========================================================================
@@ -380,14 +375,13 @@ Remember:
 # ========================================================================
 # 5. Write harness to temp file
 # ========================================================================
-def write_temp_fuzz_dir(enc, dec, assertion, target_func, seeds=[]):
+def write_temp_fuzz_dir(enc, dec, assertion, target_path, target_func, seeds=[]):
     """
     Writes encoder.py, decoder.py, assertion.py, and harness.py
     into a fresh temp directory.
     Returns path to harness.py.
     """
-    
-    target_module = target_func.__module__
+    target_path = os.path.abspath(target_path)
     target_function = target_func.__name__
     tmpdir = tempfile.mkdtemp(prefix="fuzz_harness_")
 
@@ -415,8 +409,6 @@ import os
 import atheris
 import json
 import traceback
-import importlib
-import importlib.util
 
 # allow importing modules in this temp directory
 sys.path.insert(0, '{tmpdir}')
@@ -425,36 +417,30 @@ from encoder import encode
 from decoder import decode
 from assertion import post_condition
 
-# ---------------- Target loading logic ----------------
-
-# 注意：这里用的是字符串常量，不是模块本身
-TARGET_MODULE = {target_module!r}        # 可能是 'tools/fuzz_atheris/test_function.py' 或 'tools.fuzz_atheris.test_function'
-TARGET_FUNCTION_NAME = {target_function!r}  # 比如 'buggy_sort'
-
+# Import target function
+TARGET_PATH = '{target_path}'
+TARGET_FUNC = '{target_function}'
 
 def _load_target_function():
-    module = None
+    spec = TARGET_PATH
 
-    # 情况 1：TARGET_MODULE 是一个 .py 路径
-    if TARGET_MODULE.endswith('.py') and os.path.isfile(TARGET_MODULE):
-        spec = importlib.util.spec_from_file_location("temp_target_module", TARGET_MODULE)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["temp_target_module"] = module
-        spec.loader.exec_module(module)
+    if os.path.isfile(spec) and spec.endswith(".py"):
+        module_name = "fuzz_target_module"
+        m_spec = importlib.util.spec_from_file_location(module_name, spec)
+        module = importlib.util.module_from_spec(m_spec)
+        sys.modules[module_name] = module
+        m_spec.loader.exec_module(module)
     else:
-        # 情况 2：把它当成正常的模块路径来 import
-        module = importlib.import_module(TARGET_MODULE)
+        # 否则按模块名处理，例如 "pkg.mod.sub"
+        module = importlib.import_module(spec)
 
-    if not hasattr(module, TARGET_FUNCTION_NAME):
-        raise ValueError(f"Function '{{TARGET_FUNCTION_NAME}}' not found in module '{{TARGET_MODULE}}'")
+    if not hasattr(module, TARGET_FUNC):
+        raise ValueError(f"Function '{target_function}' not found.")
 
-    return getattr(module, TARGET_FUNCTION_NAME)
+    return getattr(module, TARGET_FUNC)
 
 
-# 以后都用这个 target_function
 target_function = _load_target_function()
-
-
 def _log_crash(kind, obj, out, exc):
     crash = {{
         "kind": kind,
@@ -490,8 +476,8 @@ def _prepare_seed_corpus():
     for seed in seeds:
         try:
             b = encode(seed)
-            # 文件名避免冲突（这里原来 'seed_' + count 会报错）
-            filename = os.path.join(corpus_dir, f"seed_{{count}}")
+            # 文件名避免冲突
+            filename = os.path.join(corpus_dir, 'seed_' + count)
             with open(filename, 'wb') as f:
                 f.write(b)
             count += 1
@@ -541,7 +527,6 @@ def main():
 
     # 使用 seeds 的 corpus 目录作为 fuzz 初始 corpus
     corpus_dir = os.path.join('{tmpdir}', 'corpus')
-    os.makedirs(corpus_dir, exist_ok=True)
     sys.argv.append(corpus_dir)
 
     atheris.Setup(sys.argv, TestOneInput)
@@ -607,7 +592,7 @@ def main():
 
     try:
         spec = load_spec_file(args.spec)
-        target_func = resolve_target(args.target)
+        left, target_func = resolve_target(args.target)
 
         # 1. Generate harness using LLM
         harness_info = generate_harness_with_llm(
@@ -622,6 +607,7 @@ def main():
             enc=harness_info["encoder_code"],
             dec=harness_info["decoder_code"],
             assertion=harness_info["assertion_code"],
+            target_path=left,
             target_func=target_func,
             seeds=seeds
         )
