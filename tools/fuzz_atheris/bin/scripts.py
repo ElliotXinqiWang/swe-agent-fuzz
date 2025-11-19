@@ -410,7 +410,7 @@ def write_temp_fuzz_dir(enc, dec, assertion, target_func, seeds=[]):
 
     # 2. Write fixed harness template
     harness_template = f"""
-    import sys
+import sys
 import os
 import atheris
 import json
