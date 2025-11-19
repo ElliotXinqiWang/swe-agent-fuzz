@@ -145,8 +145,6 @@ def _parse_llm_json(raw: str) -> dict:
         # 如果还是不行，就把原文吐出去方便调试
         raise ValueError(f"LLM returned invalid JSON:\n{raw}")
 
-
-
 # ========================================================================
 # 1. CLI / Argument Parsing
 # ========================================================================
@@ -191,10 +189,10 @@ def resolve_target(target: str):
         'pkg.mod:func'
         'path/to/file.py:func'
     输出：
-        (target_path, target_function_name)
+        (target_path, target_function)
     其中：
         - target_path：绝对路径（如果是模块名，则返回 None）
-        - target_function_name：字符串
+        - target_function：目标函数
     """
     if ":" not in target:
         raise ValueError("Target must be of the form 'module:func' or 'file.py:func'")
@@ -204,10 +202,20 @@ def resolve_target(target: str):
     # file path case
     if os.path.isfile(left) and left.endswith(".py"):
         abs_path = os.path.abspath(left)
-        return abs_path, func_name
-
+        spec = importlib.util.spec_from_file_location("fuzz_target_module", abs_path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["fuzz_target_module"] = module
+        spec.loader.exec_module(module)
+        if not hasattr(module, func_name):
+            raise ValueError(f"Function '{func_name}' not found in file '{abs_path}'")
+        return abs_path, getattr(module, func_name)
+    
     # module import path case
-    return left, func_name
+    else:
+        module = importlib.import_module(left)
+        if not hasattr(module, func_name):
+            raise ValueError(f"Function '{func_name}' not found in module '{left}'")
+        return left, getattr(module, func_name)
 
 
 # ========================================================================
@@ -367,7 +375,7 @@ Remember:
         "decoder_code": obj["decoder"],
         "assertion_code": obj["post_condition"],
         "seeds": obj["seeds"],
-        "target_module": module_name,
+        "target_module": module_path,
         "target_function": func_name,
         "signature": signature,
     }# ========================================================================
@@ -408,6 +416,7 @@ import os
 import atheris
 import json
 import traceback
+import importlib
 
 # allow importing modules in this temp directory
 sys.path.insert(0, '{tmpdir}')
@@ -653,8 +662,12 @@ def main():
             "error": repr(e),
             "traceback": traceback.format_exc(),
         }
+    def _safe(o):
+        if callable(o):
+            return f"<function {o.__name__}>"
+        return str(o)
 
-    print(json.dumps(output, indent=2))
+    print(json.dumps(output, indent=2, default=_safe))
 
 
 # ========================================================================
