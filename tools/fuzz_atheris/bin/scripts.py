@@ -485,7 +485,7 @@ def _prepare_seed_corpus():
         try:
             b = encode(seed)
             # 文件名避免冲突
-            filename = os.path.join(corpus_dir, 'seed_' + count)
+            filename = os.path.join(corpus_dir, 'seed_' + str(count))
             with open(filename, 'wb') as f:
                 f.write(b)
             count += 1
