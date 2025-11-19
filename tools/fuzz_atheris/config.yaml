@@ -1,0 +1,28 @@
+tools:
+  fuzz_atheris:
+    signature: "fuzz_atheris <module_path> [--seconds=<seconds>]"
+    docstring: >
+      Run Atheris-based fuzzing on a Python module.
+      This tool will:
+      (1) read the given Python file,
+      (2) call GPT-4.1 to automatically choose a target function,
+          design an encoder/decoder, and initial seed inputs,
+      (3) generate an Atheris fuzz harness,
+      (4) execute the harness for a short period,
+      (5) print a JSON report including whether a crash occurred and the stderr.
+
+      Use this tool when you want to discover hidden crashes or generate
+      additional failing inputs for a Python repository without existing tests.
+    arguments:
+      - name: module_path
+        type: string
+        description: >
+          Relative path (from repo root) to the Python module to fuzz,
+          e.g. "mypkg/foo.py".
+        required: true
+      - name: seconds
+        type: integer
+        description: >
+          Optional timeout in seconds for the fuzzing run (default: 20).
+        required: false
+

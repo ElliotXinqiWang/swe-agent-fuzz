@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+#
+# fuzz_test - LLM-assisted fuzzing runner
+#
+# Thin bash wrapper that forwards arguments to the Python backend.
+# Usage:
+#   fuzz_test <target> --spec=<path> [--mode=<quick|deep|debug>]
+
+set -e
+
+# -------------------------------
+# Helper: print usage
+# -------------------------------
+print_usage() {
+    cat << 'EOF'
+Usage: fuzz_test <target> --spec=<spec_file> [--mode=<mode>]
+
+Options:
+  <target>            Fully-qualified function, e.g., "pkg.mod:func"
+                      or file reference "./foo.py:func".
+  
+  --spec=<file>       Path to a YAML/JSON spec file containing natural-language
+                      pre/post conditions and input descriptions.
+
+  --mode=<mode>       Fuzzing mode: quick (default), deep, debug.
+
+Example:
+  fuzz_test mypkg.a:run --spec=./specs/mytest.yaml --mode=quick
+EOF
+}
+
+# -------------------------------
+# Parse positional + flags
+# -------------------------------
+if [[ $# -lt 1 ]]; then
+    echo "Error: missing <target>" >&2
+    print_usage
+    exit 1
+fi
+
+TARGET="$1"
+shift
+
+SPEC_FILE=""
+MODE="quick"
+
+# Parse remaining flags
+for arg in "$@"; do
+    case $arg in
+        --spec=*)
+            SPEC_FILE="${arg#*=}"
+            shift
+            ;;
+        --mode=*)
+            MODE="${arg#*=}"
+            shift
+            ;;
+        -*)
+            echo "Unknown option: $arg" >&2
+            print_usage
+            exit 1
+            ;;
+        *)
+            echo "Unexpected extra argument: $arg" >&2
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$SPEC_FILE" ]]; then
+    echo "Error: --spec=<file> is required" >&2
+    exit 1
+fi
+
+# -------------------------------
+# Locate Python backend
+# -------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BACKEND="$SCRIPT_DIR/scripts.py"
+# ECHO "Using backend script at $PYTHON_BACKEND"
+if [[ ! -f "$PYTHON_BACKEND" ]]; then
+    echo "Error: Missing backend script at $PYTHON_BACKEND" >&2
+    exit 1
+fi
+
+# -------------------------------
+# Call Python backend
+# -------------------------------
+python3 "$PYTHON_BACKEND" \
+    --target "$TARGET" \
+    --spec "$SPEC_FILE" \
+    --mode "$MODE"

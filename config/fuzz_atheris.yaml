@@ -1,0 +1,129 @@
+# Formerly called: anthropic_filemap.yaml
+# This template is heavily inspired by anthropic's computer use demo, but you can use
+# it with any LM.
+env:
+  deployment:
+    type: docker
+  # post_startup_commands:
+  #   -
+agent:
+  templates:
+    system_template: |-
+      You are a helpful assistant that can interact with a computer to analyze Python code repositories
+      and design fuzzing experiments. You DO NOT modify repository source files in this configuration.
+      Your primary goal is to:
+      - identify promising fuzz targets in the codebase,
+      - reason about useful postconditions/invariants for these targets,
+      - invoke tools (like bash and fuzz_atheris) to run fuzzing,
+      - and produce a clear, structured fuzzing report.
+
+      Prefer targets where you can define meaningful postconditions, e.g.:
+      - sorting functions: assert len(input) == len(output) and output is sorted
+      - parsing/serialization: round-trip invariants, non-empty constraints, valid ranges
+      - numerical functions: bounds, monotonicity, shape/length invariants, etc.
+
+      You may still read files, list directories, and run commands, but you should not edit files
+      or attempt to produce patches in this configuration.
+    instance_template: |-
+      <uploaded_files>
+      {{working_dir}}
+      </uploaded_files>
+
+      I've uploaded a Python code repository in the directory {{working_dir}}.
+
+      Your task in THIS configuration is NOT to fix bugs directly or modify code.
+      Instead, your goal is to DESIGN AND EXECUTE FUZZING EXPERIMENTS and produce a fuzzing report.
+
+      More concretely, follow these steps:
+
+      1. Inspect the repository structure (e.g., via ls, find, or using the registry tools) to understand
+         where the main Python packages and modules are.
+      2. Identify 1-3 promising Python modules/functions as fuzz targets, with a preference for:
+         - parsers, serializers, validators, normalizers,
+         - sorting or transformation functions,
+         - functions with clear input/output structure and invariants.
+      3. For each chosen target function, explicitly think about and write down reasonable POSTCONDITIONS
+         and invariants that should always hold. Examples:
+         - sorting: assert len(input) == len(output) and output is sorted,
+           and output elements form a permutation of the input.
+         - parsing: parsed object can be serialized back without error,
+           or certain fields must be non-empty / in a valid range.
+         - numeric code: shapes/lengths are preserved, values are finite, etc.
+      4. Use the fuzz_atheris tool to fuzz these modules, e.g.:
+           fuzz_atheris path/to/module.py --seconds=20
+         The fuzz_atheris tool will:
+         - read the given module,
+         - (via its own internal LLM call) automatically choose a concrete target function,
+           design encoder/decoder and initial seed inputs,
+           and inject postcondition-like checks into the fuzz harness when appropriate,
+         - run Atheris fuzzing for the requested time,
+         - and output a JSON report describing crashes and stderr.
+      5. If helpful, you may also create small reproduction scripts and run them with:
+           python <filename.py>
+         using the bash tool, in order to manually confirm crashing inputs or behavior.
+      6. Finally, produce a FUZZING REPORT that includes at least:
+         - which modules/functions were fuzzed,
+         - what postconditions/invariants you intended to enforce for each target,
+         - high-level description of encoder/decoder strategy and seed inputs (as far as you can infer),
+         - whether any crashes or assertion failures were found,
+         - crash stack traces or summaries,
+         - example crashing inputs (if available from tool output),
+         - any hypotheses about the root cause (but do NOT implement patches).
+
+      IMPORTANT CONSTRAINTS:
+      - Do NOT modify any repository source files in {{working_dir}}.
+      - Do NOT attempt to write patches or change tests in this configuration.
+      - Your role is to explore with fuzzing and report, not to fix.
+
+      Your thinking should be thorough and it's fine if it's very long. Make sure your final answer
+      is a clear, structured fuzzing report that a human developer could later use to implement fixes.
+    next_step_template: |-
+      OBSERVATION:
+      {{observation}}
+    next_step_no_output_template: |-
+      Your command ran successfully and did not produce any output.
+  tools:
+    env_variables:
+      PAGER: cat
+      MANPAGER: cat
+      LESS: -R
+      PIP_PROGRESS_BAR: 'off'
+      TQDM_DISABLE: '1'
+      GIT_PAGER: cat
+    bundles:
+      - path: tools/registry
+      # 不再加载 edit_anthropic / review_on_submit_m，因为这一步不需要真正改代码或提交 PR
+      - path: tools/fuzz_atheris
+    registry_variables:
+      USE_FILEMAP: 'true'
+      # SUBMIT_REVIEW_MESSAGES 当前阶段用不到，但保留不会有坏处
+      SUBMIT_REVIEW_MESSAGES:
+        - |
+          Thank you for your work on this issue. Please carefully follow the steps below to help review your changes.
+
+          1. If you made any changes to your code after running the reproduction script, please run the reproduction script again.
+            If the reproduction script is failing, please revisit your changes and make sure they are correct.
+            If you have already removed your reproduction script, please ignore this step.
+          2. Remove your reproduction script (if you haven't done so already).
+          3. If you have modified any TEST files, please revert them to the state they had before you started fixing the issue.
+            You can do this with `git checkout -- /path/to/test/file.py`. Use below <diff> to find the files you need to revert.
+          4. Run the submit command again to confirm.
+
+          Here is a list of all of your changes:
+
+          <diff>
+          {{diff}}
+          </diff>
+    enable_bash_tool: true
+    parse_function:
+      type: function_calling
+  history_processors:
+    - type: cache_control
+      last_n_messages: 2
+  model:
+    name: 'claude-sonnet-4-20250514'
+    temperature: 1.
+    completion_kwargs:
+      reasoning_effort: 'high'
+    # top_p: null
+    # temperature: 0: 1.

@@ -1,0 +1,47 @@
+# testcases.yaml
+
+target_function:
+  description: "A buggy integer sorting function that is supposed to return a non-decreasing list."
+  signature_hint: "buggy_sort(nums: list[int]) -> list[int]"
+
+issue_description:
+  natural_language: >
+    The function is intended to sort the input list of integers in non-decreasing
+    order, but there is a corner-case bug. For some inputs, especially when the
+    smallest element should be moved to the first position, the result is not
+    properly sorted.
+
+input_description:
+  natural_language: >
+    The input is a Python list of integers. The fuzzer should generate lists
+    of various lengths (including empty lists and single-element lists) and
+    with various values: positive numbers, negative numbers, zeros, duplicates,
+    already sorted lists, and reverse-sorted lists. The list length should be
+    reasonably small (for example between 0 and 20 elements), but the distribution
+    of values should be diverse enough to reveal sorting corner cases.
+
+pre_condition:
+  natural_language: >
+    The function should accept any Python list of integers without crashing.
+    It should handle empty lists, very small lists, and lists with repeated
+    or negative values. No matter what integers appear in the list, the function
+    must not raise unexpected exceptions.
+
+post_condition:
+  natural_language: >
+    The returned list must be the same length as the input list, must contain
+    exactly the same multiset of integers as the input (no elements added,
+    removed, or changed), and must be sorted in non-decreasing order
+    (each element is less than or equal to the next one). If any of these
+    conditions is violated, the post-condition should be considered false.
+
+harness_hints:
+  preferred_seed_examples:
+    # 典型的“看似正常但可能暴露 bug”的例子
+    - [3, 1, 2]
+    - [3, 2, 1]
+    - [2, 1, 1]
+    - [1, 2, 3]
+    - []
+    - [0, 0, 0]
+    - [5, 4, 3, 2, 1]
