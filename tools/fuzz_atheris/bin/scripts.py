@@ -410,11 +410,13 @@ def write_temp_fuzz_dir(enc, dec, assertion, target_func, seeds=[]):
 
     # 2. Write fixed harness template
     harness_template = f"""
-import sys
+    import sys
 import os
 import atheris
 import json
 import traceback
+import importlib
+import importlib.util
 
 # allow importing modules in this temp directory
 sys.path.insert(0, '{tmpdir}')
@@ -423,8 +425,34 @@ from encoder import encode
 from decoder import decode
 from assertion import post_condition
 
-# Import target function
-from {target_module} import {target_function} as target_function
+# ---------------- Target loading logic ----------------
+
+# 注意：这里用的是字符串常量，不是模块本身
+TARGET_MODULE = {target_module!r}        # 可能是 'tools/fuzz_atheris/test_function.py' 或 'tools.fuzz_atheris.test_function'
+TARGET_FUNCTION_NAME = {target_function!r}  # 比如 'buggy_sort'
+
+
+def _load_target_function():
+    module = None
+
+    # 情况 1：TARGET_MODULE 是一个 .py 路径
+    if TARGET_MODULE.endswith('.py') and os.path.isfile(TARGET_MODULE):
+        spec = importlib.util.spec_from_file_location("temp_target_module", TARGET_MODULE)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["temp_target_module"] = module
+        spec.loader.exec_module(module)
+    else:
+        # 情况 2：把它当成正常的模块路径来 import
+        module = importlib.import_module(TARGET_MODULE)
+
+    if not hasattr(module, TARGET_FUNCTION_NAME):
+        raise ValueError(f"Function '{{TARGET_FUNCTION_NAME}}' not found in module '{{TARGET_MODULE}}'")
+
+    return getattr(module, TARGET_FUNCTION_NAME)
+
+
+# 以后都用这个 target_function
+target_function = _load_target_function()
 
 
 def _log_crash(kind, obj, out, exc):
@@ -462,8 +490,8 @@ def _prepare_seed_corpus():
     for seed in seeds:
         try:
             b = encode(seed)
-            # 文件名避免冲突
-            filename = os.path.join(corpus_dir, 'seed_' + count)
+            # 文件名避免冲突（这里原来 'seed_' + count 会报错）
+            filename = os.path.join(corpus_dir, f"seed_{{count}}")
             with open(filename, 'wb') as f:
                 f.write(b)
             count += 1
@@ -513,6 +541,7 @@ def main():
 
     # 使用 seeds 的 corpus 目录作为 fuzz 初始 corpus
     corpus_dir = os.path.join('{tmpdir}', 'corpus')
+    os.makedirs(corpus_dir, exist_ok=True)
     sys.argv.append(corpus_dir)
 
     atheris.Setup(sys.argv, TestOneInput)
