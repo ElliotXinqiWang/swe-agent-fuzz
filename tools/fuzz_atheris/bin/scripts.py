@@ -43,7 +43,8 @@ except ImportError:
     
     
 def summarize_fuzz_result(fuzz_result: Dict[str, Any],
-                          max_log_chars: int = 4000) -> Dict[str, Any]:
+                          max_log_chars: int = 4000,
+                          mode="quick") -> Dict[str, Any]:
     """
     Compress and classify raw fuzz_result for the outer model:
     - 归一化 status
@@ -68,6 +69,24 @@ def summarize_fuzz_result(fuzz_result: Dict[str, Any],
                 continue
         return crashes
     
+    def extract_passed_input_from_stderr(stderr: str) -> list[dict]:
+        """
+        Scan stderr lines, parse any FUZZ_PASS_JSON:... entries into dicts.
+        """
+        passes = []
+        prefix = "FUZZ_PASS_JSON:"
+        for line in stderr.splitlines():
+            line = line.strip()
+            if not line.startswith(prefix):
+                continue
+            payload = line[len(prefix):]
+            try:
+                obj = json.loads(payload)
+                passes.append(obj)
+            except Exception:
+                # 最坏情况：忽略这条，不让整个工具挂
+                continue
+        return passes
     # 1. 先根据 error/returncode 归类 status
     if "error" in fuzz_result:
         if fuzz_result.get("error") == "timeout":
@@ -94,11 +113,12 @@ def summarize_fuzz_result(fuzz_result: Dict[str, Any],
         "status": status,
         "returncode": fuzz_result.get("returncode"),
         "stdout": _truncate(fuzz_result.get("stdout", "")),
-        "stderr": _truncate(fuzz_result.get("stderr", "")),
+        # "stderr": _truncate(fuzz_result.get("stderr", "")),
         # 下面两个主要用于 debug，不一定每次都有
         "raw_error": fuzz_result.get("error"),
         "traceback": fuzz_result.get("traceback"),
         "crashes": extract_crashes_from_stderr(fuzz_result.get("stderr", "")),
+        "passes": extract_passed_input_from_stderr(fuzz_result.get("stderr", "")) if mode == "debug" else [],
     }
     
 def _parse_llm_json(raw: str) -> dict:
@@ -391,7 +411,7 @@ def write_temp_fuzz_dir(enc, dec, assertion, target_path, target_func, seeds=[],
     target_path = os.path.abspath(target_path)
     target_function = target_func.__name__
     tmpdir = tempfile.mkdtemp(prefix="fuzz_harness_")
-    crash_limit = 5 if mode == "deep" else 1
+    crash_limit = 10 if mode == "deep" else 3
     timeout = 30 if mode == "deep" else 10
 
     def write_file(name, code):
@@ -435,6 +455,7 @@ CRASH_LIMIT = {crash_limit}
 CRASH_COUNT = 0
 TIMEOUT = {timeout}
 START_TIME = 0
+MODE = '{mode}'
 
 def _load_target_function():
     spec = TARGET_PATH
@@ -456,6 +477,18 @@ def _load_target_function():
 
 
 target_function = _load_target_function()
+def _log_pass(kind, obj, out):
+    passed = {{
+        "kind": kind,
+        "decoded_input_repr": repr(obj),
+        "output_repr": repr(out),
+    }}
+    try:
+        payload = json.dumps(passed, ensure_ascii=False)
+    except Exception:
+        payload = json.dumps({{"kind": kind, "error": "failed_to_serialize_pass"}})
+    print("FUZZ_PASS_JSON:" + payload, file=sys.stderr, flush=True)
+
 def _log_crash(kind, obj, out, exc):
     crash = {{
         "kind": kind,
@@ -552,6 +585,9 @@ def TestOneInput(data):
         if CRASH_COUNT >= CRASH_LIMIT:
             raise
         return
+    if MODE == 'debug':
+        _log_pass("passed", obj, out)
+    
 
 
 def main():
@@ -684,7 +720,7 @@ def main():
             seeds=seeds
         )
 
-        summarized = summarize_fuzz_result(fuzz_result)
+        summarized = summarize_fuzz_result(fuzz_result, mode=args.mode)
 
         # 4. Combine all info
         output = {
