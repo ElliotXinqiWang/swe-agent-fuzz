@@ -382,7 +382,7 @@ Remember:
 # ========================================================================
 # 5. Write harness to temp file
 # ========================================================================
-def write_temp_fuzz_dir(enc, dec, assertion, target_path, target_func, seeds=[]):
+def write_temp_fuzz_dir(enc, dec, assertion, target_path, target_func, seeds=[], mode="quick") -> str:
     """
     Writes encoder.py, decoder.py, assertion.py, and harness.py
     into a fresh temp directory.
@@ -391,6 +391,8 @@ def write_temp_fuzz_dir(enc, dec, assertion, target_path, target_func, seeds=[])
     target_path = os.path.abspath(target_path)
     target_function = target_func.__name__
     tmpdir = tempfile.mkdtemp(prefix="fuzz_harness_")
+    crash_limit = 5 if mode == "deep" else 1
+    timeout = 30 if mode == "deep" else 10
 
     def write_file(name, code):
         path = os.path.join(tmpdir, name)
@@ -417,6 +419,7 @@ import atheris
 import json
 import traceback
 import importlib
+import time
 
 # allow importing modules in this temp directory
 sys.path.insert(0, '{tmpdir}')
@@ -428,6 +431,10 @@ from assertion import post_condition
 # Import target function
 TARGET_PATH = '{target_path}'
 TARGET_FUNC = '{target_function}'
+CRASH_LIMIT = {crash_limit}
+CRASH_COUNT = 0
+TIMEOUT = {timeout}
+START_TIME = 0
 
 def _load_target_function():
     spec = TARGET_PATH
@@ -495,6 +502,11 @@ def _prepare_seed_corpus():
 
 
 def TestOneInput(data):
+    global START_TIME
+    # 超时检查
+    if TIMEOUT > 0 and (time.time() - START_TIME) > TIMEOUT:   
+        _log_crash("timeout", None, None, None)
+        raise TimeoutError("Fuzzing time limit exceeded")
     obj = None
     out = None
 
@@ -502,7 +514,7 @@ def TestOneInput(data):
     try:
         obj = decode(data)
     except Exception as e:
-        _log_crash("decode_exception", obj, out, e)
+        _log_crash("decode_exception", obj, None, e)
         raise
 
     # 2. call target function
@@ -515,19 +527,31 @@ def TestOneInput(data):
         else:
             out = target_function(obj)
     except Exception as e:
-        _log_crash("exception", obj, out, e)
-        raise
+        _log_crash("exception", obj, None, e)
+        global CRASH_COUNT
+        CRASH_COUNT += 1
+        if CRASH_COUNT >= CRASH_LIMIT:
+            raise
+        return
 
     # 3. post-condition
     try:
         ok = post_condition(obj, out)
     except Exception as e:
         _log_crash("post_condition_exception", obj, out, e)
-        raise
+        global CRASH_COUNT
+        CRASH_COUNT += 1
+        if CRASH_COUNT >= CRASH_LIMIT:
+            raise
+        return
 
     if not ok:
         _log_crash("post_condition_failure", obj, out, None)
-        raise AssertionError("Post-condition failed")
+        global CRASH_COUNT
+        CRASH_COUNT += 1
+        if CRASH_COUNT >= CRASH_LIMIT:
+            raise
+        return
 
 
 def main():
@@ -538,6 +562,8 @@ def main():
     sys.argv.append(corpus_dir)
 
     atheris.Setup(sys.argv, TestOneInput)
+    global START_TIME
+    START_TIME = time.time()
     atheris.Fuzz()
 
 
@@ -666,15 +692,15 @@ def main():
 
             "target": {
                 "module": harness_info["target_module"],
-                "function": harness_info["target_function"],
+                "function": harness_info["target_function"].__name__,
                 "signature": harness_info["signature"],
             },
 
-            "harness": {
+            "harness_components": {
                 "harness_path": harness_path,
-                "encoder_code": harness_info["encoder_code"],
-                "decoder_code": harness_info["decoder_code"],
-                "assertion_code": harness_info["assertion_code"],
+                "encoder": harness_info["encoder_code"],
+                "decoder": harness_info["decoder_code"],
+                "post_condition": harness_info["assertion_code"],
                 # 如果你觉得太长，可以先不返回 harness_code，或者以后再打开
                 # "harness_code": <如果你想，也可以从文件里读回去>,
             },
