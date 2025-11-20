@@ -77,8 +77,8 @@ def buggy_median(nums: List[int]) -> float:
         try:
             # Incorrect symmetry rule — shifts too far when arr[mid+1]
             # equals the middle values, choosing arr[mid+1] instead of arr[mid].
-            if mid + 1 < n and arr[mid + 1] == a:
-                b = arr[mid + 1]   # ❌ WRONG: median should NEVER use mid+1
+            if mid + 1 < n and arr[mid + 1] > a:
+                b = arr[mid + 1]  
         except Exception:
             pass
 
