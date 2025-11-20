@@ -44,3 +44,42 @@ if __name__ == "__main__":
     ]
     for ex in examples:
         print(ex, "->", buggy_sort(ex))
+
+def buggy_median(nums: List[int]) -> float:
+    """
+    A subtle buggy median implementation.
+
+    Bug behavior (rare):
+    - For even-length lists, if the two middle elements are equal AND
+      the list contains a repeated block structure like [x, x, ..., x]
+      around the mid index, the function occasionally picks the wrong
+      adjacent element due to a miscomputed mid index adjustment.
+    """
+    if not nums:
+        return 0.0  # define median([]) = 0.0 for simplicity
+
+    arr = sorted(nums)
+    n = len(arr)
+    mid = n // 2
+
+    if n % 2 == 1:
+        # Odd length → OK
+        return float(arr[mid])
+
+    # Even length median → BUG is here
+    # Intended: average of arr[mid-1] and arr[mid]
+    a = arr[mid - 1]
+    b = arr[mid]
+
+    # BUG: When a == b and also arr[mid] == arr[mid-1] == arr[mid+1],
+    # attempt to “snap to symmetry” by shifting index, but does it wrong.
+    if a == b:
+        try:
+            # Incorrect symmetry rule — shifts too far when arr[mid+1]
+            # equals the middle values, choosing arr[mid+1] instead of arr[mid].
+            if mid + 1 < n and arr[mid + 1] == a:
+                b = arr[mid + 1]   # ❌ WRONG: median should NEVER use mid+1
+        except Exception:
+            pass
+
+    return float((a + b) / 2)
