@@ -503,6 +503,9 @@ def _prepare_seed_corpus():
 
 def TestOneInput(data):
     global START_TIME
+    global CRASH_COUNT
+    global TIMEOUT
+    global CRASH_LIMIT
     # 超时检查
     if TIMEOUT > 0 and (time.time() - START_TIME) > TIMEOUT:   
         _log_crash("timeout", None, None, None)
@@ -528,7 +531,6 @@ def TestOneInput(data):
             out = target_function(obj)
     except Exception as e:
         _log_crash("exception", obj, None, e)
-        global CRASH_COUNT
         CRASH_COUNT += 1
         if CRASH_COUNT >= CRASH_LIMIT:
             raise
@@ -539,7 +541,6 @@ def TestOneInput(data):
         ok = post_condition(obj, out)
     except Exception as e:
         _log_crash("post_condition_exception", obj, out, e)
-        global CRASH_COUNT
         CRASH_COUNT += 1
         if CRASH_COUNT >= CRASH_LIMIT:
             raise
@@ -547,7 +548,6 @@ def TestOneInput(data):
 
     if not ok:
         _log_crash("post_condition_failure", obj, out, None)
-        global CRASH_COUNT
         CRASH_COUNT += 1
         if CRASH_COUNT >= CRASH_LIMIT:
             raise
@@ -555,6 +555,7 @@ def TestOneInput(data):
 
 
 def main():
+    global START_TIME
     _prepare_seed_corpus()
 
     # 使用 seeds 的 corpus 目录作为 fuzz 初始 corpus
@@ -562,7 +563,6 @@ def main():
     sys.argv.append(corpus_dir)
 
     atheris.Setup(sys.argv, TestOneInput)
-    global START_TIME
     START_TIME = time.time()
     atheris.Fuzz()
 
