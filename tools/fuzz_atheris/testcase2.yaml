@@ -1,0 +1,50 @@
+target_function:
+  description: >
+    A buggy median-computation function. For most inputs it returns correct
+    medians, but there is a subtle boundary-case bug in the median logic
+    for even-length lists when the middle elements form certain symmetric
+    repeated-value patterns.
+
+  signature_hint: "buggy_median(nums: list[int]) -> float"
+
+issue_description:
+  natural_language: >
+    The function attempts to compute the median of a list of integers.
+    It sorts the list first, and then:
+      - If the length is odd, it returns the middle element.
+      - If the length is even, it attempts to average the two middle elements.
+    However, when the length is even AND the two middle values are equal AND
+    the value immediately to the right of the middle block is also the same,
+    the function incorrectly “snaps” the median to arr[mid+1], creating a
+    subtle off-by-one error. This only occurs for very specific repeated-value
+    patterns and is therefore rare.
+
+input_description:
+  natural_language: >
+    The input is a Python list of integers of arbitrary length. The fuzzer
+    should try:
+      - Odd-length and even-length lists
+      - Lists containing repeated blocks of identical values
+      - Lists with symmetric patterns (e.g. [..., x, x, x, ...])
+      - Lists with all values equal
+      - Lists with random integers, including extreme values
+      - Lists with length between 0 and about 25
+    The most interesting failing cases are even-length lists where elements
+    around the midpoint produce repeated-value structures such as:
+      [x, x, x, x], [1, 5, 5, 5, 10, 10], or [3, 3, 3, 3].
+
+pre_condition:
+  natural_language: >
+    The function should never raise exceptions for any list of integers.
+    Negative numbers, duplicates, large integers, empty lists, and extreme
+    distributions must all be handled without crashing.
+
+post_condition:
+  natural_language: >
+    The returned value must be the true mathematical median:
+      - If the list length is odd: the middle element after sorting.
+      - If the list length is even: the average of the two middle elements.
+    The output must be correct for all value patterns, including cases
+    with large blocks of repeated values. If the computed median deviates
+    from the mathematically correct median, the post-condition should be
+    considered false.
